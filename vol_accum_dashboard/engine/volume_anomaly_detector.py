@@ -180,6 +180,8 @@ class VolumeAnomalyDetector:
         """
         Detect volume anomalies for a single token.
 
+        Uses whatever historical data is available for each timeframe.
+
         Args:
             token_id: Unique token identifier
             min_severity: Minimum severity to report
@@ -200,16 +202,26 @@ class VolumeAnomalyDetector:
             print(f"Error loading historical volumes for {token_id}: {e}")
             return None
 
+        # If no historical data, still create alert with current volume
         if not daily_volumes:
-            return None
+            daily_volumes = []
 
         # Calculate comparisons for all timeframes
         comparisons = {}
         max_spike_ratio = 0.0
 
         for days in COMPARISON_TIMEFRAMES:
-            avg_daily = self.calculate_average_daily_volume(daily_volumes, days)
-            spike_ratio = self.calculate_spike_ratio(current_volume, avg_daily)
+            # Use available data (might be less than requested timeframe)
+            available_days = min(len(daily_volumes), days)
+
+            if available_days > 0:
+                avg_daily = self.calculate_average_daily_volume(daily_volumes, available_days)
+                spike_ratio = self.calculate_spike_ratio(current_volume, avg_daily)
+            else:
+                # No historical data for this timeframe - treat current as baseline
+                avg_daily = current_volume
+                spike_ratio = 1.0
+
             severity = self.determine_severity(spike_ratio)
 
             comparisons[f"{days}d"] = VolumeComparison(
@@ -374,9 +386,12 @@ class VolumeAnomalyDetector:
         """
         Get top tokens sorted by spike ratio against historical average.
 
+        Uses whatever historical data is available - if a token has less than
+        the requested timeframe, it compares against the available days.
+
         Args:
             top_n: Number of top tokens to return
-            timeframe_days: Number of days for average calculation (default: 30)
+            timeframe_days: Target number of days for average calculation (default: 30)
 
         Returns:
             List of token data sorted by spike ratio (descending)
@@ -388,12 +403,17 @@ class VolumeAnomalyDetector:
                 # Load historical volumes
                 daily_volumes = await self.load_historical_volumes(token_id, days=timeframe_days)
 
+                # Use whatever data we have - don't skip tokens with less history
                 if not daily_volumes:
-                    continue
-
-                # Calculate average and spike ratio
-                avg_daily = self.calculate_average_daily_volume(daily_volumes, timeframe_days)
-                spike_ratio = self.calculate_spike_ratio(volume, avg_daily)
+                    # No historical data at all - use current volume as baseline
+                    avg_daily = volume
+                    actual_days = 0
+                    spike_ratio = 1.0  # Current equals "average"
+                else:
+                    # Use available data (might be less than requested timeframe)
+                    actual_days = len(daily_volumes)
+                    avg_daily = self.calculate_average_daily_volume(daily_volumes, actual_days)
+                    spike_ratio = self.calculate_spike_ratio(volume, avg_daily)
 
                 # Get token metadata
                 registry = await self.store.load_token_registry()
@@ -418,6 +438,7 @@ class VolumeAnomalyDetector:
                     "dominant_exchange": dominant_exchange,
                     "dominant_share": dominant_share,
                     "timeframe_days": timeframe_days,
+                    "actual_days_used": actual_days,  # How many days actually available
                 })
 
             except Exception as e:

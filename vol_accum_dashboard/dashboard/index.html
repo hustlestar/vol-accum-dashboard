@@ -295,14 +295,15 @@
                     <th>Token</th>
                     <th>Spike Ratio</th>
                     <th>15min Volume</th>
-                    <th>30d Avg</th>
+                    <th>Avg Volume</th>
+                    <th>Days</th>
                     <th>Dominant Exchange</th>
                     <th>Share %</th>
                 </tr>
             </thead>
             <tbody id="tokens-table">
                 <tr>
-                    <td colspan="7" class="loading">Waiting for data...</td>
+                    <td colspan="8" class="loading">Waiting for data...</td>
                 </tr>
             </tbody>
         </table>
@@ -432,7 +433,7 @@
             activeTokensEl.textContent = tokens.length;
 
             if (!tokens || tokens.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No tokens tracked yet</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No tokens tracked yet</td></tr>';
                 return;
             }
 
@@ -441,7 +442,7 @@
                 knownTokens.add(token.token_id);
 
                 const rowClass = isNew ? 'new-token' : '';
-                
+
                 // Determine spike ratio color
                 let spikeClass = 'spike-low';
                 if (token.spike_ratio >= 2.0) {
@@ -450,6 +451,12 @@
                     spikeClass = 'spike-medium';
                 }
 
+                // Display actual days used for comparison
+                const daysUsed = token.actual_days_used !== undefined ? token.actual_days_used : token.timeframe_days;
+                const daysDisplay = daysUsed === 0 ? '<span style="color: #f59e0b;">New</span>' :
+                                   daysUsed < token.timeframe_days ? `<span style="color: #60a5fa;">${daysUsed}/${token.timeframe_days}</span>` :
+                                   daysUsed;
+
                 return `
                     <tr class="${rowClass}">
                         <td>${index + 1}</td>
@@ -457,6 +464,7 @@
                         <td class="spike-ratio-cell ${spikeClass}">${token.spike_ratio.toFixed(2)}x</td>
                         <td class="volume-cell">$${formatNumber(token.volume_15min)}</td>
                         <td class="volume-cell">$${formatNumber(token.avg_daily_volume)}</td>
+                        <td>${daysDisplay}</td>
                         <td>
                             <span class="exchange-badge">${token.dominant_exchange}</span>
                         </td>
