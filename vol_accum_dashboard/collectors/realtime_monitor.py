@@ -9,6 +9,8 @@ from vol_accum_dashboard.config import (
     EXCHANGES,
     REALTIME_WINDOW_MINUTES,
     CALCULATION_INTERVAL_SECONDS,
+    ALLOWED_QUOTE_CURRENCIES,
+    STABLECOINS,
 )
 from vol_accum_dashboard.engine.volume_anomaly_detector import VolumeAnomalyDetector
 from vol_accum_dashboard.storage.json_store import JSONStore
@@ -122,6 +124,14 @@ class RealtimeMonitor:
                         market = exchange.market(symbol)
                         base = market['base']
                         quote = market['quote']
+
+                        # Filter: Only USDT pairs
+                        if quote not in ALLOWED_QUOTE_CURRENCIES:
+                            continue
+
+                        # Filter: Exclude stablecoins
+                        if base in STABLECOINS:
+                            continue
 
                         # Map to token IDs
                         base_token_id, quote_token_id = await self.token_mapper.map_exchange_pair(

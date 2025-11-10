@@ -118,18 +118,23 @@ class JSONStore:
     def get_daily_volume_path(self, token_id: str, date_obj: date) -> Path:
         """
         Get the path for a daily volume file using year/month/day structure.
-        
-        Structure: data/volumes/YYYY/MM/DD/{token_id}.json
-        Example: data/volumes/2024/11/10/BTC_native_bitcoin.json
+
+        Structure: data/volumes/YYYY/MM/DD/{symbol}.json
+        Example: data/volumes/2024/11/10/BTC.json
+
+        Note: Uses only the symbol part (before first underscore) from token_id
         """
         year = str(date_obj.year)
         month = f"{date_obj.month:02d}"
         day = f"{date_obj.day:02d}"
-        
+
         day_dir = VOLUMES_DIR / year / month / day
         day_dir.mkdir(parents=True, exist_ok=True)
-        
-        return day_dir / f"{token_id}.json"
+
+        # Extract just the symbol (part before first underscore)
+        symbol = token_id.split('_')[0] if '_' in token_id else token_id
+
+        return day_dir / f"{symbol}.json"
 
     async def save_daily_volume(
         self,

@@ -8,6 +8,8 @@ from vol_accum_dashboard.config import (
     EXCHANGES,
     BOOTSTRAP_DAYS,
     BOOTSTRAP_BATCH_SIZE,
+    ALLOWED_QUOTE_CURRENCIES,
+    STABLECOINS,
 )
 from vol_accum_dashboard.models import (
     DailyVolumeData,
@@ -185,6 +187,14 @@ class HistoricalCollector:
         symbol = market['symbol']
         base = market['base']
         quote = market['quote']
+
+        # Filter: Only USDT pairs
+        if quote not in ALLOWED_QUOTE_CURRENCIES:
+            return False
+
+        # Filter: Exclude stablecoins
+        if base in STABLECOINS:
+            return False
 
         try:
             # Map tokens to token IDs

@@ -7,7 +7,7 @@ from typing import List
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 TOKENS_DIR = DATA_DIR / "tokens"
-VOLUMES_DIR = DATA_DIR / "volumes"  # Changed: now directly under data/
+VOLUMES_DIR = DATA_DIR / "volumes"
 LIVE_DIR = DATA_DIR / "live"
 SNAPSHOTS_DIR = DATA_DIR / "snapshots"
 BOOTSTRAP_DIR = DATA_DIR / "bootstrap"
@@ -25,6 +25,15 @@ EXCHANGES = [
     "kraken",
     "kucoin",
     "gateio",
+]
+
+# Quote currency filter - only track pairs quoted in these
+ALLOWED_QUOTE_CURRENCIES = ["USDT"]
+
+# Stablecoins to exclude from tracking
+STABLECOINS = [
+    "USDT", "USDC", "BUSD", "DAI", "TUSD", "USDD", "FDUSD",
+    "UST", "USDP", "GUSD", "LUSD", "FRAX", "SUSD"
 ]
 
 # Time windows for volume comparison (in days)
