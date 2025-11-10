@@ -23,6 +23,10 @@ from vol_accum_dashboard.models import (
 )
 
 
+# Global lock for token registry to prevent concurrent writes
+_registry_lock = asyncio.Lock()
+
+
 class JSONStore:
     """Handles all JSON file operations."""
 
@@ -37,8 +41,12 @@ class JSONStore:
 
     async def save_json(self, file_path: Path, data: Any) -> None:
         """Save data to JSON file asynchronously."""
-        async with aiofiles.open(file_path, "w") as f:
+        # Write to temp file first, then atomic rename
+        temp_path = file_path.with_suffix('.tmp')
+        async with aiofiles.open(temp_path, "w") as f:
             await f.write(json.dumps(data, indent=2, default=str))
+        # Atomic rename
+        temp_path.replace(file_path)
 
     async def load_json(self, file_path: Path) -> Optional[Dict]:
         """Load data from JSON file asynchronously."""
@@ -47,39 +55,62 @@ class JSONStore:
         try:
             async with aiofiles.open(file_path, "r") as f:
                 content = await f.read()
+                if not content or content.strip() == "":
+                    return None
                 return json.loads(content)
+        except json.JSONDecodeError as e:
+            print(f"Error loading {file_path}: {e}")
+            return None
         except Exception as e:
             print(f"Error loading {file_path}: {e}")
             return None
 
     # Token Registry Operations
     async def load_token_registry(self) -> Dict[str, TokenMetadata]:
-        """Load the token registry."""
-        data = await self.load_json(self.token_registry_path)
-        if not data:
-            return {}
-        return {
-            token_id: TokenMetadata(**metadata)
-            for token_id, metadata in data.items()
-        }
+        """Load the token registry with locking."""
+        async with _registry_lock:
+            data = await self.load_json(self.token_registry_path)
+            if not data:
+                return {}
+            return {
+                token_id: TokenMetadata(**metadata)
+                for token_id, metadata in data.items()
+            }
 
     async def save_token_registry(self, registry: Dict[str, TokenMetadata]) -> None:
-        """Save the token registry."""
-        data = {
-            token_id: metadata.model_dump()
-            for token_id, metadata in registry.items()
-        }
-        await self.save_json(self.token_registry_path, data)
+        """Save the token registry with locking."""
+        async with _registry_lock:
+            data = {
+                token_id: metadata.model_dump()
+                for token_id, metadata in registry.items()
+            }
+            await self.save_json(self.token_registry_path, data)
 
     async def add_token_to_registry(
         self,
         token_id: str,
         metadata: TokenMetadata,
     ) -> None:
-        """Add or update a token in the registry."""
-        registry = await self.load_token_registry()
-        registry[token_id] = metadata
-        await self.save_token_registry(registry)
+        """Add or update a token in the registry with locking."""
+        async with _registry_lock:
+            # Load current registry
+            registry = {}
+            data = await self.load_json(self.token_registry_path)
+            if data:
+                registry = {
+                    tid: TokenMetadata(**meta)
+                    for tid, meta in data.items()
+                }
+            
+            # Update or add token
+            registry[token_id] = metadata
+            
+            # Save back
+            save_data = {
+                tid: meta.model_dump()
+                for tid, meta in registry.items()
+            }
+            await self.save_json(self.token_registry_path, save_data)
 
     # Daily Volume Operations
     def get_daily_volume_path(self, token_id: str, date: date) -> Path:
