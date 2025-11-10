@@ -294,6 +294,7 @@
                     <th>Rank</th>
                     <th>Token</th>
                     <th>Spike Ratio</th>
+                    <th>vs Prev Day</th>
                     <th>15min Volume</th>
                     <th>Avg Volume</th>
                     <th>Days</th>
@@ -303,7 +304,7 @@
             </thead>
             <tbody id="tokens-table">
                 <tr>
-                    <td colspan="8" class="loading">Waiting for data...</td>
+                    <td colspan="9" class="loading">Waiting for data...</td>
                 </tr>
             </tbody>
         </table>
@@ -433,7 +434,7 @@
             activeTokensEl.textContent = tokens.length;
 
             if (!tokens || tokens.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No tokens tracked yet</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No tokens tracked yet</td></tr>';
                 return;
             }
 
@@ -451,6 +452,15 @@
                     spikeClass = 'spike-medium';
                 }
 
+                // Previous day ratio color coding
+                const prevDayRatio = token.prev_day_ratio || 1.0;
+                let prevDayClass = 'spike-low';
+                if (prevDayRatio >= 2.0) {
+                    prevDayClass = 'spike-high';
+                } else if (prevDayRatio >= 1.0) {
+                    prevDayClass = 'spike-medium';
+                }
+
                 // Display actual days used for comparison
                 const daysUsed = token.actual_days_used !== undefined ? token.actual_days_used : token.timeframe_days;
                 const daysDisplay = daysUsed === 0 ? '<span style="color: #f59e0b;">New</span>' :
@@ -462,6 +472,7 @@
                         <td>${index + 1}</td>
                         <td class="token-symbol">${token.symbol}</td>
                         <td class="spike-ratio-cell ${spikeClass}">${token.spike_ratio.toFixed(2)}x</td>
+                        <td class="spike-ratio-cell ${prevDayClass}">${prevDayRatio.toFixed(2)}x</td>
                         <td class="volume-cell">$${formatNumber(token.volume_15min)}</td>
                         <td class="volume-cell">$${formatNumber(token.avg_daily_volume)}</td>
                         <td>${daysDisplay}</td>

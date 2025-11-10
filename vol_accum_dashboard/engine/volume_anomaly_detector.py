@@ -397,6 +397,7 @@ class VolumeAnomalyDetector:
             List of token data sorted by spike ratio (descending)
         """
         tokens = []
+        yesterday = date.today() - timedelta(days=1)
 
         for token_id, volume in self.current_volumes.items():
             try:
@@ -414,6 +415,17 @@ class VolumeAnomalyDetector:
                     actual_days = len(daily_volumes)
                     avg_daily = self.calculate_average_daily_volume(daily_volumes, actual_days)
                     spike_ratio = self.calculate_spike_ratio(volume, avg_daily)
+
+                # Load yesterday's volume for day-over-day comparison
+                prev_day_volume_data = await self.store.load_daily_volume(token_id, yesterday)
+                prev_day_volume = prev_day_volume_data.total_volume_usd if prev_day_volume_data else 0
+
+                # Calculate day-over-day ratio (current 15min vs yesterday's daily volume / 96)
+                if prev_day_volume > 0:
+                    prev_day_15min_estimate = prev_day_volume / 96
+                    prev_day_ratio = volume / prev_day_15min_estimate
+                else:
+                    prev_day_ratio = 1.0 if volume > 0 else 0.0
 
                 # Get token metadata
                 registry = await self.store.load_token_registry()
@@ -434,6 +446,8 @@ class VolumeAnomalyDetector:
                     "volume_15min": volume,
                     "avg_daily_volume": avg_daily,
                     "spike_ratio": spike_ratio,
+                    "prev_day_volume": prev_day_volume,
+                    "prev_day_ratio": prev_day_ratio,
                     "exchanges": exchanges,
                     "dominant_exchange": dominant_exchange,
                     "dominant_share": dominant_share,

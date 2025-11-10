@@ -281,7 +281,8 @@ async def broadcast_update(message: dict):
     """Broadcast a message to all connected WebSocket clients."""
     disconnected = []
 
-    for client in connected_clients:
+    # Iterate over a copy to avoid "dictionary changed size during iteration" error
+    for client in list(connected_clients):
         try:
             await client.send_json(message)
         except Exception:
@@ -289,7 +290,8 @@ async def broadcast_update(message: dict):
 
     # Remove disconnected clients
     for client in disconnected:
-        connected_clients.remove(client)
+        if client in connected_clients:
+            connected_clients.remove(client)
 
 
 def main():
