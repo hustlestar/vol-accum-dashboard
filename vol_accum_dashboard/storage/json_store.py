@@ -1,4 +1,4 @@
-"""JSON storage layer for volume data."""
+"""JSON storage layer for volume data with year/month/day structure."""
 
 import json
 import asyncio
@@ -13,7 +13,6 @@ from vol_accum_dashboard.config import (
     SNAPSHOTS_DIR,
     BOOTSTRAP_DIR,
     TOKEN_REGISTRY_FILE,
-    DAILY_VOLUME_FILE_PATTERN,
 )
 from vol_accum_dashboard.models import (
     TokenMetadata,
@@ -28,7 +27,7 @@ _registry_lock = asyncio.Lock()
 
 
 class JSONStore:
-    """Handles all JSON file operations."""
+    """Handles all JSON file operations with hierarchical date structure."""
 
     def __init__(self):
         self.token_registry_path = TOKENS_DIR / TOKEN_REGISTRY_FILE
@@ -40,7 +39,10 @@ class JSONStore:
             directory.mkdir(parents=True, exist_ok=True)
 
     async def save_json(self, file_path: Path, data: Any) -> None:
-        """Save data to JSON file asynchronously."""
+        """Save data to JSON file asynchronously with atomic write."""
+        # Ensure parent directory exists
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
         # Write to temp file first, then atomic rename
         temp_path = file_path.with_suffix('.tmp')
         async with aiofiles.open(temp_path, "w") as f:
@@ -112,31 +114,40 @@ class JSONStore:
             }
             await self.save_json(self.token_registry_path, save_data)
 
-    # Daily Volume Operations
-    def get_daily_volume_path(self, token_id: str, date: date) -> Path:
-        """Get the path for a daily volume file."""
-        token_dir = VOLUMES_DIR / token_id
-        token_dir.mkdir(parents=True, exist_ok=True)
-        filename = DAILY_VOLUME_FILE_PATTERN.format(date=date.isoformat())
-        return token_dir / filename
+    # Daily Volume Operations with hierarchical structure
+    def get_daily_volume_path(self, token_id: str, date_obj: date) -> Path:
+        """
+        Get the path for a daily volume file using year/month/day structure.
+        
+        Structure: data/volumes/YYYY/MM/DD/{token_id}.json
+        Example: data/volumes/2024/11/10/BTC_native_bitcoin.json
+        """
+        year = str(date_obj.year)
+        month = f"{date_obj.month:02d}"
+        day = f"{date_obj.day:02d}"
+        
+        day_dir = VOLUMES_DIR / year / month / day
+        day_dir.mkdir(parents=True, exist_ok=True)
+        
+        return day_dir / f"{token_id}.json"
 
     async def save_daily_volume(
         self,
         token_id: str,
-        date: date,
+        date_obj: date,
         volume_data: DailyVolumeData,
     ) -> None:
         """Save daily volume data for a token."""
-        file_path = self.get_daily_volume_path(token_id, date)
+        file_path = self.get_daily_volume_path(token_id, date_obj)
         await self.save_json(file_path, volume_data.model_dump())
 
     async def load_daily_volume(
         self,
         token_id: str,
-        date: date,
+        date_obj: date,
     ) -> Optional[DailyVolumeData]:
         """Load daily volume data for a token."""
-        file_path = self.get_daily_volume_path(token_id, date)
+        file_path = self.get_daily_volume_path(token_id, date_obj)
         data = await self.load_json(file_path)
         if data:
             return DailyVolumeData(**data)
@@ -151,27 +162,75 @@ class JSONStore:
         """Load daily volumes for a date range."""
         volumes = []
         current_date = start_date
+        
         while current_date <= end_date:
             volume_data = await self.load_daily_volume(token_id, current_date)
             if volume_data:
                 volumes.append(volume_data)
-            current_date = current_date.replace(day=current_date.day + 1)
+            
+            # Move to next day
+            from datetime import timedelta
+            current_date = current_date + timedelta(days=1)
+            
         return volumes
 
     async def get_available_volume_days(self, token_id: str) -> List[date]:
-        """Get all dates with available volume data for a token."""
-        token_dir = VOLUMES_DIR / token_id
-        if not token_dir.exists():
-            return []
-
+        """
+        Get all dates with available volume data for a token.
+        Scans the year/month/day directory structure.
+        """
         dates = []
-        for file_path in token_dir.glob("daily_*.json"):
-            try:
-                date_str = file_path.stem.replace("daily_", "")
-                dates.append(date.fromisoformat(date_str))
-            except Exception:
+        
+        # Scan all year directories
+        if not VOLUMES_DIR.exists():
+            return []
+            
+        for year_dir in sorted(VOLUMES_DIR.iterdir()):
+            if not year_dir.is_dir() or not year_dir.name.isdigit():
                 continue
+                
+            # Scan all month directories
+            for month_dir in sorted(year_dir.iterdir()):
+                if not month_dir.is_dir() or not month_dir.name.isdigit():
+                    continue
+                    
+                # Scan all day directories
+                for day_dir in sorted(month_dir.iterdir()):
+                    if not day_dir.is_dir() or not day_dir.name.isdigit():
+                        continue
+                        
+                    # Check if this token exists in this day
+                    token_file = day_dir / f"{token_id}.json"
+                    if token_file.exists():
+                        try:
+                            year = int(year_dir.name)
+                            month = int(month_dir.name)
+                            day = int(day_dir.name)
+                            dates.append(date(year, month, day))
+                        except ValueError:
+                            continue
+                            
         return sorted(dates)
+
+    def get_day_directory(self, date_obj: date) -> Path:
+        """Get the directory path for a specific day."""
+        year = str(date_obj.year)
+        month = f"{date_obj.month:02d}"
+        day = f"{date_obj.day:02d}"
+        return VOLUMES_DIR / year / month / day
+
+    async def get_all_tokens_for_day(self, date_obj: date) -> List[str]:
+        """Get all token IDs that have data for a specific day."""
+        day_dir = self.get_day_directory(date_obj)
+        if not day_dir.exists():
+            return []
+            
+        token_ids = []
+        for file_path in day_dir.glob("*.json"):
+            # Token ID is the filename without .json
+            token_ids.append(file_path.stem)
+            
+        return token_ids
 
     # Bootstrap Progress Operations
     def get_bootstrap_progress_path(self, exchange: str) -> Path:
@@ -220,28 +279,70 @@ class JSONStore:
         file_path = SNAPSHOTS_DIR / filename
         await self.save_json(file_path, data)
 
-    # Raw Bootstrap Data Operations
-    def get_raw_data_path(self, exchange: str, date: date) -> Path:
-        """Get path for raw exchange data."""
-        exchange_dir = BOOTSTRAP_DIR / exchange
+    # Raw Bootstrap Data Operations  
+    def get_raw_data_path(self, exchange: str, date_obj: date) -> Path:
+        """
+        Get path for raw exchange data with hierarchical structure.
+        
+        Structure: data/bootstrap/{exchange}/YYYY/MM/{date}.json
+        """
+        exchange_dir = BOOTSTRAP_DIR / exchange / str(date_obj.year) / f"{date_obj.month:02d}"
         exchange_dir.mkdir(parents=True, exist_ok=True)
-        return exchange_dir / f"{date.isoformat()}.json"
+        return exchange_dir / f"{date_obj.day:02d}.json"
 
     async def save_raw_exchange_data(
         self,
         exchange: str,
-        date: date,
+        date_obj: date,
         data: Dict[str, Any],
     ) -> None:
         """Save raw exchange data."""
-        file_path = self.get_raw_data_path(exchange, date)
+        file_path = self.get_raw_data_path(exchange, date_obj)
         await self.save_json(file_path, data)
 
     async def load_raw_exchange_data(
         self,
         exchange: str,
-        date: date,
+        date_obj: date,
     ) -> Optional[Dict[str, Any]]:
         """Load raw exchange data."""
-        file_path = self.get_raw_data_path(exchange, date)
+        file_path = self.get_raw_data_path(exchange, date_obj)
         return await self.load_json(file_path)
+
+    # Cleanup utilities
+    async def cleanup_old_data(self, days_to_keep: int = 365):
+        """
+        Remove volume data older than specified days.
+        Keeps directory structure clean.
+        """
+        from datetime import timedelta
+        cutoff_date = date.today() - timedelta(days=days_to_keep)
+        
+        removed_count = 0
+        
+        for year_dir in VOLUMES_DIR.iterdir():
+            if not year_dir.is_dir():
+                continue
+                
+            year = int(year_dir.name)
+            
+            for month_dir in year_dir.iterdir():
+                if not month_dir.is_dir():
+                    continue
+                    
+                month = int(month_dir.name)
+                
+                for day_dir in month_dir.iterdir():
+                    if not day_dir.is_dir():
+                        continue
+                        
+                    day = int(day_dir.name)
+                    dir_date = date(year, month, day)
+                    
+                    if dir_date < cutoff_date:
+                        # Remove entire day directory
+                        import shutil
+                        shutil.rmtree(day_dir)
+                        removed_count += 1
+                        
+        return removed_count

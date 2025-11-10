@@ -7,7 +7,7 @@ from typing import List
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 TOKENS_DIR = DATA_DIR / "tokens"
-VOLUMES_DIR = TOKENS_DIR / "volumes"
+VOLUMES_DIR = DATA_DIR / "volumes"  # Changed: now directly under data/
 LIVE_DIR = DATA_DIR / "live"
 SNAPSHOTS_DIR = DATA_DIR / "snapshots"
 BOOTSTRAP_DIR = DATA_DIR / "bootstrap"
@@ -61,5 +61,7 @@ COINGECKO_REQUEST_DELAY = 1.2  # seconds between requests (free tier: 50 calls/m
 
 # Storage settings
 SNAPSHOT_INTERVAL_MINUTES = 60  # Save snapshots every hour
-DAILY_VOLUME_FILE_PATTERN = "daily_{date}.json"
 TOKEN_REGISTRY_FILE = "token_registry.json"
+
+# Data retention
+DATA_RETENTION_DAYS = 365  # Keep data for 1 year by default
