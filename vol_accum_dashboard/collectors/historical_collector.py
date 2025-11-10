@@ -196,6 +196,17 @@ class HistoricalCollector:
         if base in STABLECOINS:
             return False
 
+        # Filter: Only spot markets (exclude futures, options, etc.)
+        market_type = market.get('type', 'spot')
+        if market_type != 'spot':
+            return False
+
+        # Filter: Exclude options (symbols with date-strike-type pattern)
+        # Options look like: BTC/USDT:USDT-260925-120000-P
+        if '-' in symbol and ':' in symbol:
+            # Likely an options contract - skip
+            return False
+
         try:
             # Map tokens to token IDs
             base_token_id, quote_token_id = await self.token_mapper.map_exchange_pair(
