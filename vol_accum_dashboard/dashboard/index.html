@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Volume Accumulation Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background: #0a0e27;
+            color: #e4e4e7;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+        }
+
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .status {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            font-size: 0.9em;
+        }
+
+        .status-item {
+            padding: 5px 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-dot.connected {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        .status-dot.disconnected {
+            background: #ef4444;
+        }
+
+        .alerts-section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 1.5em;
+            margin-bottom: 15px;
+            padding-left: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .alert-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .alert-card {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid;
+            transition: transform 0.2s;
+        }
+
+        .alert-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .alert-card.extreme {
+            border-color: #dc2626;
+            background: linear-gradient(135deg, #1e293b 0%, #2a1a1a 100%);
+        }
+
+        .alert-card.high {
+            border-color: #f59e0b;
+            background: linear-gradient(135deg, #1e293b 0%, #2a2110 100%);
+        }
+
+        .alert-card.medium {
+            border-color: #3b82f6;
+            background: linear-gradient(135deg, #1e293b 0%, #1a2438 100%);
+        }
+
+        .alert-symbol {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .alert-stat {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 0.9em;
+        }
+
+        .alert-stat .label {
+            color: #94a3b8;
+        }
+
+        .alert-stat .value {
+            font-weight: 600;
+        }
+
+        .spike-ratio {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #10b981;
+            text-align: center;
+            margin: 10px 0;
+        }
+
+        .table-container {
+            background: #1e293b;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #334155;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #334155;
+            transition: background 0.2s;
+        }
+
+        tbody tr:hover {
+            background: #2d3748;
+        }
+
+        tbody tr.new-token {
+            animation: highlight 2s ease-out;
+        }
+
+        @keyframes highlight {
+            0% {
+                background: #3b82f6;
+            }
+            100% {
+                background: transparent;
+            }
+        }
+
+        td {
+            padding: 15px;
+        }
+
+        .token-symbol {
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .volume-cell {
+            font-family: 'Courier New', monospace;
+        }
+
+        .exchange-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #334155;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-right: 5px;
+        }
+
+        .trend-up {
+            color: #10b981;
+        }
+
+        .trend-normal {
+            color: #94a3b8;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding: 20px;
+            color: #64748b;
+            font-size: 0.9em;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #64748b;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #64748b;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Volume Accumulation Dashboard</h1>
+        <div class="status">
+            <div class="status-item">
+                <span class="status-dot disconnected" id="connection-status"></span>
+                <span id="connection-text">Connecting...</span>
+            </div>
+            <div class="status-item">
+                Window: <span id="window-time">--:--</span>
+            </div>
+            <div class="status-item">
+                Active Tokens: <span id="active-tokens">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="alerts-section">
+        <div class="section-title">Volume Spike Alerts</div>
+        <div class="alert-grid" id="alerts-container">
+            <div class="loading">Waiting for data...</div>
+        </div>
+    </div>
+
+    <div class="section-title">Top Tokens by 15min Volume</div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Token</th>
+                    <th>15min Volume</th>
+                    <th>Dominant Exchange</th>
+                    <th>Share %</th>
+                    <th>Trend</th>
+                </tr>
+            </thead>
+            <tbody id="tokens-table">
+                <tr>
+                    <td colspan="6" class="loading">Waiting for data...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        Real-time crypto volume anomaly detection | Last update: <span id="last-update">--:--:--</span>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        let knownTokens = new Set();
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                updateConnectionStatus(true);
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+                updateLastUpdate();
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus(false);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateConnectionStatus(false);
+
+                // Try to reconnect
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    setTimeout(() => {
+                        console.log(`Reconnecting... (attempt ${reconnectAttempts})`);
+                        connectWebSocket();
+                    }, 3000 * reconnectAttempts);
+                }
+            };
+        }
+
+        function handleMessage(message) {
+            switch (message.type) {
+                case 'connected':
+                    console.log('Connected to server');
+                    break;
+                case 'alerts':
+                    updateAlerts(message.data);
+                    break;
+                case 'top_tokens':
+                    updateTokensTable(message.data);
+                    break;
+                case 'ping':
+                    // Keepalive
+                    break;
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const dot = document.getElementById('connection-status');
+            const text = document.getElementById('connection-text');
+
+            if (connected) {
+                dot.classList.remove('disconnected');
+                dot.classList.add('connected');
+                text.textContent = 'Connected';
+            } else {
+                dot.classList.remove('connected');
+                dot.classList.add('disconnected');
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        function updateAlerts(alerts) {
+            const container = document.getElementById('alerts-container');
+
+            if (!alerts || alerts.length === 0) {
+                container.innerHTML = '<div class="empty-state">No alerts at the moment</div>';
+                return;
+            }
+
+            container.innerHTML = alerts.map(alert => {
+                const comp1d = alert.comparisons['1d'];
+                const severity = comp1d.severity;
+
+                return `
+                    <div class="alert-card ${severity}">
+                        <div class="alert-symbol">${alert.symbol}</div>
+                        <div class="spike-ratio">${comp1d.spike_ratio.toFixed(2)}x</div>
+                        <div class="alert-stat">
+                            <span class="label">15min Volume:</span>
+                            <span class="value">$${formatNumber(alert.current_15min_volume)}</span>
+                        </div>
+                        <div class="alert-stat">
+                            <span class="label">1d Avg:</span>
+                            <span class="value">$${formatNumber(comp1d.avg_daily_volume)}</span>
+                        </div>
+                        <div class="alert-stat">
+                            <span class="label">Dominant:</span>
+                            <span class="value">${alert.dominant_exchange} (${alert.dominant_exchange_share.toFixed(1)}%)</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateTokensTable(tokens) {
+            const tbody = document.getElementById('tokens-table');
+            const activeTokensEl = document.getElementById('active-tokens');
+
+            activeTokensEl.textContent = tokens.length;
+
+            if (!tokens || tokens.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No tokens tracked yet</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = tokens.map((token, index) => {
+                const isNew = !knownTokens.has(token.token_id);
+                knownTokens.add(token.token_id);
+
+                const rowClass = isNew ? 'new-token' : '';
+                const trendClass = token.volume_15min > 100000 ? 'trend-up' : 'trend-normal';
+
+                return `
+                    <tr class="${rowClass}">
+                        <td>${index + 1}</td>
+                        <td class="token-symbol">${token.symbol}</td>
+                        <td class="volume-cell">$${formatNumber(token.volume_15min)}</td>
+                        <td>
+                            <span class="exchange-badge">${token.dominant_exchange}</span>
+                        </td>
+                        <td>${token.dominant_share.toFixed(1)}%</td>
+                        <td class="${trendClass}">●</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function formatNumber(num) {
+            if (num >= 1e9) {
+                return (num / 1e9).toFixed(2) + 'B';
+            } else if (num >= 1e6) {
+                return (num / 1e6).toFixed(2) + 'M';
+            } else if (num >= 1e3) {
+                return (num / 1e3).toFixed(2) + 'K';
+            }
+            return num.toFixed(2);
+        }
+
+        function updateLastUpdate() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            document.getElementById('last-update').textContent = timeStr;
+        }
+
+        function updateWindowTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            document.getElementById('window-time').textContent = timeStr;
+        }
+
+        // Initialize
+        connectWebSocket();
+        updateWindowTime();
+        setInterval(updateWindowTime, 1000);
+    </script>
+</body>
+</html>
