@@ -365,3 +365,66 @@ class VolumeAnomalyDetector:
 
             if timestamp_str:
                 self.last_calculation_time = datetime.fromisoformat(timestamp_str)
+
+    async def get_top_tokens_by_spike_ratio(
+        self,
+        top_n: int = 50,
+        timeframe_days: int = 30,
+    ) -> List[Dict]:
+        """
+        Get top tokens sorted by spike ratio against historical average.
+
+        Args:
+            top_n: Number of top tokens to return
+            timeframe_days: Number of days for average calculation (default: 30)
+
+        Returns:
+            List of token data sorted by spike ratio (descending)
+        """
+        tokens = []
+
+        for token_id, volume in self.current_volumes.items():
+            try:
+                # Load historical volumes
+                daily_volumes = await self.load_historical_volumes(token_id, days=timeframe_days)
+
+                if not daily_volumes:
+                    continue
+
+                # Calculate average and spike ratio
+                avg_daily = self.calculate_average_daily_volume(daily_volumes, timeframe_days)
+                spike_ratio = self.calculate_spike_ratio(volume, avg_daily)
+
+                # Get token metadata
+                registry = await self.store.load_token_registry()
+                symbol = token_id.split("_")[0] if token_id not in registry else registry[token_id].symbol
+
+                # Get exchange breakdown
+                exchanges = self.exchange_volumes.get(token_id, {})
+                dominant_exchange = "unknown"
+                dominant_share = 0.0
+
+                if exchanges:
+                    dominant_exchange = max(exchanges.items(), key=lambda x: x[1])[0]
+                    dominant_share = (exchanges[dominant_exchange] / volume) * 100
+
+                tokens.append({
+                    "token_id": token_id,
+                    "symbol": symbol,
+                    "volume_15min": volume,
+                    "avg_daily_volume": avg_daily,
+                    "spike_ratio": spike_ratio,
+                    "exchanges": exchanges,
+                    "dominant_exchange": dominant_exchange,
+                    "dominant_share": dominant_share,
+                    "timeframe_days": timeframe_days,
+                })
+
+            except Exception as e:
+                print(f"Error calculating spike ratio for {token_id}: {e}")
+                continue
+
+        # Sort by spike ratio (descending)
+        tokens.sort(key=lambda t: t["spike_ratio"], reverse=True)
+
+        return tokens[:top_n]

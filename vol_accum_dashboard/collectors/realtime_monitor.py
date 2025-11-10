@@ -30,6 +30,7 @@ class RealtimeMonitor:
         self.exchanges: Dict[str, ccxt.Exchange] = {}
         self.running = False
         self.window_start_time = datetime.now()
+        self.last_fetch_time = {}  # Track last fetch per exchange
 
         # Track which tokens to monitor
         self.monitored_tokens: Set[str] = set()
@@ -91,6 +92,7 @@ class RealtimeMonitor:
     async def monitor_exchange(self, exchange_id: str):
         """
         Monitor volume for a single exchange.
+        Fetches every minute and replaces (not accumulates) volume data.
 
         Args:
             exchange_id: Exchange identifier
@@ -101,14 +103,17 @@ class RealtimeMonitor:
 
         while self.running:
             try:
+                # Store volumes temporarily for this fetch
+                temp_volumes = {}
+
                 # Fetch current tickers (has 24h volume)
                 tickers = await self.rate_limiter.fetch_tickers(exchange)
 
                 # Process each ticker
                 for symbol, ticker in tickers.items():
                     try:
-                        # Get volume (in base currency)
-                        volume_24h = ticker.get('quoteVolume') or ticker.get('baseVolume', 0)
+                        # Get 24h volume in quote currency (USD value)
+                        volume_24h = ticker.get('quoteVolume', 0)
 
                         if volume_24h == 0:
                             continue
@@ -123,42 +128,43 @@ class RealtimeMonitor:
                             exchange_id, base, quote
                         )
 
-                        # Estimate 15-minute volume (rough approximation)
-                        # 24h = 96 x 15min periods, so divide by 96
-                        volume_15min = volume_24h / 96
+                        # Estimate current 15-minute volume
+                        # Use 24h / 96 as rough estimate
+                        volume_15min_estimate = volume_24h / 96
 
-                        # Get last price for USD conversion
-                        last_price = ticker.get('last', 0)
-
-                        # Convert to USD if quote is stablecoin
-                        if quote in ['USDT', 'USDC', 'USD', 'BUSD', 'DAI', 'TUSD', 'FDUSD']:
-                            volume_usd = volume_15min
-                        else:
-                            # Approximate USD value
-                            volume_usd = volume_15min * last_price
-
-                        # Update anomaly detector
-                        await self.anomaly_detector.update_current_volume(
-                            base_token_id,
-                            volume_usd,
-                            exchange_id,
-                        )
+                        # Store temporarily
+                        if base_token_id not in temp_volumes:
+                            temp_volumes[base_token_id] = {}
+                        if exchange_id not in temp_volumes[base_token_id]:
+                            temp_volumes[base_token_id][exchange_id] = 0
+                        temp_volumes[base_token_id][exchange_id] += volume_15min_estimate
 
                     except Exception as e:
                         # Skip individual ticker errors
                         continue
 
+                # Now SET (not add) the volumes for this exchange
+                for token_id, exchanges_vol in temp_volumes.items():
+                    for exch_id, vol in exchanges_vol.items():
+                        # Set the volume for this exchange (replaces old value)
+                        self.anomaly_detector.exchange_volumes.setdefault(token_id, {})[exch_id] = vol
+
+                # Recalculate total volumes from exchange breakdown
+                for token_id in self.anomaly_detector.exchange_volumes.keys():
+                    total = sum(self.anomaly_detector.exchange_volumes[token_id].values())
+                    self.anomaly_detector.current_volumes[token_id] = total
+
                 # Log progress
                 elapsed = datetime.now() - self.window_start_time
                 print(f"[{exchange_id}] Updated at {datetime.now().strftime('%H:%M:%S')} "
-                      f"(window: {elapsed.total_seconds():.0f}s)")
+                      f"(window: {elapsed.total_seconds():.0f}s, tokens: {len(temp_volumes)})")
 
                 # Wait before next fetch (avoid rate limits)
-                await asyncio.sleep(60)  # Fetch every minute
+                await asyncio.sleep(300)  # Fetch every 5 minutes (not every minute to avoid issues)
 
             except Exception as e:
                 print(f"[{exchange_id}] Error: {e}")
-                await asyncio.sleep(30)  # Wait before retry
+                await asyncio.sleep(60)  # Wait before retry
 
     async def anomaly_detection_loop(self):
         """Periodically check for volume anomalies."""
@@ -235,6 +241,10 @@ class RealtimeMonitor:
     async def get_top_tokens(self, top_n: int = 50) -> List[Dict]:
         """Get top tokens by current volume."""
         return await self.anomaly_detector.get_top_tokens_by_volume(top_n)
+
+    async def get_top_tokens_by_spike_ratio(self, top_n: int = 50, timeframe_days: int = 30) -> List[Dict]:
+        """Get top tokens by spike ratio against historical average."""
+        return await self.anomaly_detector.get_top_tokens_by_spike_ratio(top_n, timeframe_days)
 
 
 class WebSocketMonitor:

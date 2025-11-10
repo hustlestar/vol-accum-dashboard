@@ -90,21 +90,64 @@ async def get_alerts():
 
 
 @app.get("/api/top-tokens")
-async def get_top_tokens(limit: int = 50):
+async def get_top_tokens(limit: int = 50, sort_by: str = "spike_ratio", timeframe: int = 30):
     """
-    Get top tokens by current 15-minute volume.
+    Get top tokens sorted by spike ratio or volume.
 
     Args:
         limit: Number of top tokens to return (default: 50)
+        sort_by: Sort by 'spike_ratio' or 'volume' (default: 'spike_ratio')
+        timeframe: Days for average calculation when using spike_ratio (default: 30)
     """
     if not monitor:
         raise HTTPException(status_code=503, detail="Monitor not initialized")
 
-    tokens = await monitor.get_top_tokens(top_n=limit)
+    if sort_by == "spike_ratio":
+        tokens = await monitor.get_top_tokens_by_spike_ratio(top_n=limit, timeframe_days=timeframe)
+    else:
+        tokens = await monitor.get_top_tokens(top_n=limit)
+
     return {
         "timestamp": datetime.now().isoformat(),
         "window_start": monitor.window_start_time.isoformat(),
         "tokens": tokens,
+        "sort_by": sort_by,
+        "timeframe_days": timeframe if sort_by == "spike_ratio" else None,
+    }
+
+
+@app.get("/api/top-tokens-chart")
+async def get_top_tokens_chart(limit: int = 10, timeframe: int = 30):
+    """
+    Get top tokens with exchange breakdown for chart visualization.
+
+    Args:
+        limit: Number of top tokens to return (default: 10)
+        timeframe: Days for average calculation (default: 30)
+    """
+    if not monitor:
+        raise HTTPException(status_code=503, detail="Monitor not initialized")
+
+    tokens = await monitor.get_top_tokens_by_spike_ratio(top_n=limit, timeframe_days=timeframe)
+
+    # Format for chart
+    chart_data = {
+        "labels": [t["symbol"] for t in tokens],
+        "tokens": [],
+    }
+
+    for token in tokens:
+        chart_data["tokens"].append({
+            "symbol": token["symbol"],
+            "spike_ratio": token["spike_ratio"],
+            "volume_15min": token["volume_15min"],
+            "avg_daily_volume": token.get("avg_daily_volume", 0),
+            "exchanges": token["exchanges"],
+        })
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "chart_data": chart_data,
     }
 
 
@@ -162,7 +205,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
     Sends:
     - alerts: Volume spike alerts
-    - top_tokens: Top tokens by volume
+    - top_tokens: Top tokens sorted by spike ratio
+    - top_tokens_chart: Chart data for top 10 tokens
     - ping: Keepalive messages
     """
     await websocket.accept()
@@ -188,11 +232,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     "timestamp": datetime.now().isoformat(),
                 })
 
-                # Send top tokens
-                top_tokens = await monitor.get_top_tokens(top_n=50)
+                # Send top tokens (sorted by spike ratio)
+                top_tokens = await monitor.get_top_tokens_by_spike_ratio(top_n=50, timeframe_days=30)
                 await websocket.send_json({
                     "type": "top_tokens",
                     "data": top_tokens,
+                    "timestamp": datetime.now().isoformat(),
+                })
+
+                # Send chart data (top 10)
+                chart_tokens = await monitor.get_top_tokens_by_spike_ratio(top_n=10, timeframe_days=30)
+                chart_data = {
+                    "labels": [t["symbol"] for t in chart_tokens],
+                    "tokens": chart_tokens,
+                }
+                await websocket.send_json({
+                    "type": "chart_data",
+                    "data": chart_data,
                     "timestamp": datetime.now().isoformat(),
                 })
 

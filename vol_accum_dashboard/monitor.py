@@ -4,7 +4,7 @@ import asyncio
 from vol_accum_dashboard.collectors.realtime_monitor import RealtimeMonitor
 
 
-async def main():
+async def run_monitor():
     """Main monitoring function."""
     print("""
     ╔═══════════════════════════════════════════════════════════╗
@@ -27,5 +27,10 @@ async def main():
         await monitor.close()
 
 
+def main():
+    """Entry point for script."""
+    asyncio.run(run_monitor())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Volume Accumulation Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -135,6 +136,18 @@
             margin: 10px 0;
         }
 
+        .chart-section {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+        }
+
         .table-container {
             background: #1e293b;
             border-radius: 8px;
@@ -194,6 +207,23 @@
             font-family: 'Courier New', monospace;
         }
 
+        .spike-ratio-cell {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .spike-high {
+            color: #ef4444;
+        }
+
+        .spike-medium {
+            color: #f59e0b;
+        }
+
+        .spike-low {
+            color: #10b981;
+        }
+
         .exchange-badge {
             display: inline-block;
             padding: 3px 8px;
@@ -201,14 +231,6 @@
             border-radius: 4px;
             font-size: 0.8em;
             margin-right: 5px;
-        }
-
-        .trend-up {
-            color: #10b981;
-        }
-
-        .trend-normal {
-            color: #94a3b8;
         }
 
         .footer {
@@ -230,13 +252,6 @@
             text-align: center;
             padding: 60px 20px;
             color: #64748b;
-        }
-
-        .empty-state svg {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 20px;
-            opacity: 0.5;
         }
     </style>
 </head>
@@ -264,22 +279,30 @@
         </div>
     </div>
 
-    <div class="section-title">Top Tokens by 15min Volume</div>
+    <div class="chart-section">
+        <div class="section-title">Top 10 Tokens by Spike Ratio (vs 30d avg)</div>
+        <div class="chart-container">
+            <canvas id="volumeChart"></canvas>
+        </div>
+    </div>
+
+    <div class="section-title">Top Tokens by Spike Ratio (vs 30d average)</div>
     <div class="table-container">
         <table>
             <thead>
                 <tr>
                     <th>Rank</th>
                     <th>Token</th>
+                    <th>Spike Ratio</th>
                     <th>15min Volume</th>
+                    <th>30d Avg</th>
                     <th>Dominant Exchange</th>
                     <th>Share %</th>
-                    <th>Trend</th>
                 </tr>
             </thead>
             <tbody id="tokens-table">
                 <tr>
-                    <td colspan="6" class="loading">Waiting for data...</td>
+                    <td colspan="7" class="loading">Waiting for data...</td>
                 </tr>
             </tbody>
         </table>
@@ -294,6 +317,7 @@
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 5;
         let knownTokens = new Set();
+        let volumeChart = null;
 
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -343,6 +367,9 @@
                     break;
                 case 'top_tokens':
                     updateTokensTable(message.data);
+                    break;
+                case 'chart_data':
+                    updateChart(message.data);
                     break;
                 case 'ping':
                     // Keepalive
@@ -405,7 +432,7 @@
             activeTokensEl.textContent = tokens.length;
 
             if (!tokens || tokens.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No tokens tracked yet</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No tokens tracked yet</td></tr>';
                 return;
             }
 
@@ -414,21 +441,126 @@
                 knownTokens.add(token.token_id);
 
                 const rowClass = isNew ? 'new-token' : '';
-                const trendClass = token.volume_15min > 100000 ? 'trend-up' : 'trend-normal';
+                
+                // Determine spike ratio color
+                let spikeClass = 'spike-low';
+                if (token.spike_ratio >= 2.0) {
+                    spikeClass = 'spike-high';
+                } else if (token.spike_ratio >= 1.0) {
+                    spikeClass = 'spike-medium';
+                }
 
                 return `
                     <tr class="${rowClass}">
                         <td>${index + 1}</td>
                         <td class="token-symbol">${token.symbol}</td>
+                        <td class="spike-ratio-cell ${spikeClass}">${token.spike_ratio.toFixed(2)}x</td>
                         <td class="volume-cell">$${formatNumber(token.volume_15min)}</td>
+                        <td class="volume-cell">$${formatNumber(token.avg_daily_volume)}</td>
                         <td>
                             <span class="exchange-badge">${token.dominant_exchange}</span>
                         </td>
                         <td>${token.dominant_share.toFixed(1)}%</td>
-                        <td class="${trendClass}">●</td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        function updateChart(data) {
+            if (!data || !data.tokens || data.tokens.length === 0) {
+                return;
+            }
+
+            const ctx = document.getElementById('volumeChart').getContext('2d');
+
+            // Prepare data for stacked bar chart
+            const labels = data.tokens.map(t => t.symbol);
+            
+            // Get all unique exchanges
+            const allExchanges = new Set();
+            data.tokens.forEach(token => {
+                Object.keys(token.exchanges).forEach(ex => allExchanges.add(ex));
+            });
+
+            // Create datasets for each exchange
+            const exchangeColors = {
+                'binance': '#F3BA2F',
+                'coinbase': '#0052FF',
+                'okx': '#000000',
+                'bybit': '#F7A600',
+                'kraken': '#5741D9',
+                'kucoin': '#24AE8F',
+                'gateio': '#17E3A0',
+            };
+
+            const datasets = Array.from(allExchanges).map(exchange => {
+                return {
+                    label: exchange,
+                    data: data.tokens.map(token => token.exchanges[exchange] || 0),
+                    backgroundColor: exchangeColors[exchange] || '#' + Math.floor(Math.random()*16777215).toString(16),
+                };
+            });
+
+            // Destroy existing chart if it exists
+            if (volumeChart) {
+                volumeChart.destroy();
+            }
+
+            // Create new chart
+            volumeChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets,
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            stacked: true,
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#334155' },
+                        },
+                        y: {
+                            stacked: true,
+                            ticks: { 
+                                color: '#94a3b8',
+                                callback: function(value) {
+                                    return '$' + formatNumber(value);
+                                }
+                            },
+                            grid: { color: '#334155' },
+                            title: {
+                                display: true,
+                                text: '15min Volume (USD)',
+                                color: '#94a3b8',
+                            }
+                        },
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#94a3b8' },
+                            position: 'bottom',
+                        },
+                        title: {
+                            display: false,
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    label += '$' + formatNumber(context.parsed.y);
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                },
+            });
         }
 
         function formatNumber(num) {

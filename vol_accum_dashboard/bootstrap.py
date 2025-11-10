@@ -6,7 +6,7 @@ from vol_accum_dashboard.collectors.historical_collector import HistoricalCollec
 from vol_accum_dashboard.config import BOOTSTRAP_DAYS
 
 
-async def main():
+async def run_bootstrap():
     """Main bootstrap function."""
     print("""
     ╔═══════════════════════════════════════════════════════════╗
@@ -51,5 +51,10 @@ async def main():
         await collector.close()
 
 
+def main():
+    """Entry point for script."""
+    asyncio.run(run_bootstrap())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
